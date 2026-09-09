@@ -301,6 +301,8 @@ class APGui:
             keyboard.add_hotkey(self.ed_ap.config['HotKey_StartFSD'], self.callback, args=('fsd_start', None))
             keyboard.add_hotkey(self.ed_ap.config['HotKey_StartSC'], self.callback, args=('sc_start', None))
             keyboard.add_hotkey(self.ed_ap.config['HotKey_StartRobigo'], self.callback, args=('robigo_start', None))
+            if self.ed_ap.config.get('HotKey_StartWaypoint'):
+                keyboard.add_hotkey(self.ed_ap.config['HotKey_StartWaypoint'], self.callback, args=('waypoint_start', None))
 
             # TODO - Enable these to allow pips to be controlled by EDAP when using the defined keys (tbd).
             # keyboard.add_hotkey('up', self.callback, args=('up', None))

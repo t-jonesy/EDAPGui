@@ -35,12 +35,14 @@ class OCR:
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
                 text_detection_model_name="PP-OCRv5_mobile_det",
-                text_recognition_model_name="en_PP-OCRv5_mobile_rec")  # text detection + text recognition
+                text_recognition_model_name="en_PP-OCRv5_mobile_rec",
+                enable_mkldnn=False)  # text detection + text recognition; oneDNN off (crashes under Proton)
         else:
             self.paddleocr = PaddleOCR(
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
-                use_textline_orientation=False)  # text detection + text recognition
+                use_textline_orientation=False,
+                enable_mkldnn=False)  # text detection + text recognition; oneDNN off (crashes under Proton)
 
         # Class for text similarity metrics
         self.jarowinkler = JaroWinkler()
@@ -60,12 +62,14 @@ class OCR:
                     use_doc_unwarping=False,
                     use_textline_orientation=False,
                     text_detection_model_name="PP-OCRv5_mobile_det",
-                    text_recognition_model_name="en_PP-OCRv5_mobile_rec")  # text detection + text recognition
+                    text_recognition_model_name="en_PP-OCRv5_mobile_rec",
+                enable_mkldnn=False)  # text detection + text recognition; oneDNN off (crashes under Proton)
             else:
                 self.paddleocr = PaddleOCR(
                     use_doc_orientation_classify=False,
                     use_doc_unwarping=False,
-                    use_textline_orientation=False)  # text detection + text recognition
+                    use_textline_orientation=False,
+                enable_mkldnn=False)  # text detection + text recognition; oneDNN off (crashes under Proton)
 
         except Exception as e:
             logger.error(f"Failed to reinitialize PaddleOCR: {e}")
@@ -147,8 +151,16 @@ class OCR:
             logger.error(f"OCR failed: {e}")
             # Reinit to avoid hard crash on next call due to corrupted C++ state
             self._reinit_paddleocr()
-            logger.error(f"Image stored to ocr_output folder.")
-            cv2.imwrite(f"./ocr_output/{name}", image)
+            # Save the failing image for debugging, but never let this crash the caller: a bad
+            # filename/extension previously raised a cv2 error out of the handler and aborted the
+            # whole assist. Make it best-effort with a valid extension.
+            try:
+                import os as _os
+                _os.makedirs("./ocr_output", exist_ok=True)
+                cv2.imwrite(f"./ocr_output/{name or 'ocr'}.png", image)
+                logger.error("Image stored to ocr_output folder.")
+            except Exception as _save_ex:
+                logger.warning(f"Could not save OCR debug image: {_save_ex}")
             return None, None
 
     def image_simple_ocr(self, image, name='') -> list[str] | None:
@@ -203,8 +215,16 @@ class OCR:
             logger.error(f"OCR failed: {e}")
             # Reinit to avoid hard crash on next call due to corrupted C++ state
             self._reinit_paddleocr()
-            logger.error(f"Image stored to ocr_output folder.")
-            cv2.imwrite(f"./ocr_output/{name}", image)
+            # Save the failing image for debugging, but never let this crash the caller: a bad
+            # filename/extension previously raised a cv2 error out of the handler and aborted the
+            # whole assist. Make it best-effort with a valid extension.
+            try:
+                import os as _os
+                _os.makedirs("./ocr_output", exist_ok=True)
+                cv2.imwrite(f"./ocr_output/{name or 'ocr'}.png", image)
+                logger.error("Image stored to ocr_output folder.")
+            except Exception as _save_ex:
+                logger.warning(f"Could not save OCR debug image: {_save_ex}")
             return None
 
     def get_highlighted_item_data(self, image, item: Quad, name=''):
