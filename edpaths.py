@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import sys
 from os import environ
-from os.path import expanduser, isdir, join
+from os.path import expanduser, getmtime, isdir, join
 
 ED_STEAM_APPID = "359320"
 IS_WINDOWS = sys.platform == "win32"
@@ -35,28 +35,67 @@ _DEFAULT_PREFIXES = [
 ]
 
 
+def _candidate_prefixes() -> list[str]:
+    """ All existing Proton prefixes that could belong to Elite Dangerous, in no particular
+    order. The game may be installed in one Steam library while a different library's
+    compatdata holds the live prefix, so we consider every candidate and let the caller pick. """
+    cands = [expanduser(c.format(appid=ED_STEAM_APPID)) for c in _DEFAULT_PREFIXES]
+    # Steam libraries from libraryfolders.vdf (there is one per install location)
+    for vdf in (expanduser("~/.local/share/Steam/steamapps/libraryfolders.vdf"),
+                expanduser("~/.steam/steam/steamapps/libraryfolders.vdf")):
+        try:
+            with open(vdf, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('"path"'):
+                        lib = line.split('"')[3]
+                        cands.append(join(lib, "steamapps", "compatdata", ED_STEAM_APPID, "pfx"))
+        except OSError:
+            pass
+    # De-duplicate, keep only existing dirs
+    seen = set()
+    out = []
+    for c in cands:
+        if c not in seen and isdir(c):
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def _prefix_freshness(prefix: str) -> float:
+    """ Newest mtime among a prefix's *.binds and Journal.*.log files. Higher = more likely the
+    live prefix the game is actually reading and writing. Returns 0.0 if nothing found. """
+    import glob
+    newest = 0.0
+    base = join(prefix, "drive_c", "users", "steamuser")
+    patterns = [
+        join(base, "AppData", "Local", "Frontier Developments", "Elite Dangerous",
+             "Options", "Bindings", "*.binds"),
+        join(base, "Saved Games", "Frontier Developments", "Elite Dangerous", "Journal.*.log"),
+        join(base, "Saved Games", "Frontier Developments", "Elite Dangerous", "Status.json"),
+    ]
+    for pat in patterns:
+        for f in glob.glob(pat):
+            try:
+                newest = max(newest, getmtime(f))
+            except OSError:
+                pass
+    return newest
+
+
 def _find_proton_prefix() -> str | None:
     p = environ.get("EDAP_ED_PREFIX")
     if p:
         return expanduser(p)
-    for cand in _DEFAULT_PREFIXES:
-        cand = expanduser(cand.format(appid=ED_STEAM_APPID))
-        if isdir(cand):
-            return cand
-    # Look through additional Steam libraries listed in libraryfolders.vdf
-    vdf = expanduser("~/.local/share/Steam/steamapps/libraryfolders.vdf")
-    try:
-        with open(vdf, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith('"path"'):
-                    lib = line.split('"')[3]
-                    cand = join(lib, "steamapps", "compatdata", ED_STEAM_APPID, "pfx")
-                    if isdir(cand):
-                        return cand
-    except OSError:
-        pass
-    return None
+    cands = _candidate_prefixes()
+    if not cands:
+        return None
+    # Prefer the prefix whose bindings/journal files were touched most recently; that is the
+    # one the running game uses. Falls back to the first existing prefix when none has data.
+    best = max(cands, key=_prefix_freshness)
+    if _prefix_freshness(best) > 0.0:
+        return best
+    return cands[0]
 
 
 def local_appdata_dir() -> str:
