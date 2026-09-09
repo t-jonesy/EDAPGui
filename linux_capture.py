@@ -227,17 +227,18 @@ class XShmGrabber:
         if w <= 0 or h <= 0:
             return None
         with self.lock:
-            # Reuse the full-size image but only request the sub-rectangle by temporarily
-            # changing the image dimensions. XShmGetImage writes w*h pixels row-major with
-            # bytes_per_line of the image.
+            # Reuse the full-size shm image but only request the sub-rectangle by temporarily
+            # changing the image dimensions. The server packs rows at the requested width, so
+            # bytes_per_line must follow the width.
+            bpl = w * self._bpp
             self.img.contents.width = w
             self.img.contents.height = h
+            self.img.contents.bytes_per_line = bpl
             ok = self._xext.XShmGetImage(self.dpy, self.window, self.img, x, y, AllPlanes)
             if not ok:
                 return None
-            arr = np.frombuffer(self._buf, dtype=np.uint8, count=self._bpl * h)
-            arr = arr.reshape(h, self._bpl // self._bpp, self._bpp)[:, :w, :]
-            return arr.copy()
+            arr = np.frombuffer(self._buf, dtype=np.uint8, count=bpl * h)
+            return arr.reshape(h, w, self._bpp).copy()
 
     def close(self):
         try:
