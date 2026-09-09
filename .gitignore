@@ -26,3 +26,4 @@ debug-output/
 runs/
 .venv/
 linux_ed/
+autopilot *.log
