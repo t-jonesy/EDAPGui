@@ -1,13 +1,16 @@
 import threading
 from copy import copy
-from ctypes.wintypes import PRECT
+import sys
 from datetime import datetime
 from time import sleep
 
-import win32api
-import win32con
-import win32gui
-import win32ui
+IS_WINDOWS = sys.platform == "win32"
+if IS_WINDOWS:
+    from ctypes.wintypes import PRECT
+    import win32api
+    import win32con
+    import win32gui
+    import win32ui
 from Screen_Regions import Quad, Point
 
 """
@@ -442,6 +445,12 @@ class Overlay:
 
         else:
             return win32gui.DefWindowProc(hWnd, message, wParam, lParam)
+
+
+if not IS_WINDOWS:
+    # The win32 GDI overlay above cannot work on Linux; use the no-op implementation so the
+    # rest of the autopilot keeps working. (A Wayland/X11 overlay could be added later.)
+    from linux_overlay import Overlay  # noqa: F811
 
 
 def main():

@@ -4,8 +4,12 @@ import time
 
 
 '''
-import keyboard
-import win32gui
+import sys
+if sys.platform == "win32":
+    import keyboard
+    import win32gui
+else:
+    import linux_hotkeys as keyboard
 
 import Screen_Regions
 from ED_AP import *

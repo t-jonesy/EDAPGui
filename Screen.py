@@ -3,16 +3,22 @@ import time
 import typing
 from copy import copy
 
+import sys
 import cv2
-import win32con
-import win32gui
 import numpy as np
 from numpy import array
-import mss
 import json
 
 from EDlogger import logger
 from Screen_Regions import Quad
+
+IS_WINDOWS = sys.platform == "win32"
+if IS_WINDOWS:
+    import win32con
+    import win32gui
+    import mss
+else:
+    import linux_capture
 
 """
 File:Screen.py    
@@ -36,6 +42,10 @@ def set_focus_elite_window():
     """ set focus to the ED window, if ED does not have focus then the keystrokes will go to the window
     that does have focus. """
     ed_title = "Elite - Dangerous (CLIENT)"
+
+    if not IS_WINDOWS:
+        linux_capture.focus_window(ed_title)
+        return
 
     # TODO - determine if GetWindowText is faster than FindWindow if ED is in foreground
     if win32gui.GetWindowText(win32gui.GetForegroundWindow()) == ed_title:
@@ -78,7 +88,8 @@ def crop_image_pix(image, quad: Quad):
 class Screen:
     def __init__(self, cb):
         self.ap_ckb = cb
-        self.mss = mss.mss()
+        self.mss = mss.mss() if IS_WINDOWS else None
+        self._grabber = None  # Linux XShm grabber
         self.using_screen = True  # True to use screen, false to use an image. Set screen_image to the image
         self._screen_image = None  # Screen image captured from screen, or loaded by user for testing.
         self.screen_width = 0
@@ -103,7 +114,16 @@ class Screen:
             logger.debug(f'Found Elite Dangerous window position: {self.ed_rect}')
 
         # Examine all monitors to determine match with ED
-        self.mons = self.mss.monitors
+        if IS_WINDOWS:
+            self.mons = self.mss.monitors
+        else:
+            # Linux: capture is relative to the ED window itself, so the "monitor" is the window.
+            self.mons = [None]
+            if self.ed_rect is not None:
+                self.mons.append({'left': self.ed_rect[0], 'top': self.ed_rect[1],
+                                  'width': self.ed_rect[2] - self.ed_rect[0],
+                                  'height': self.ed_rect[3] - self.ed_rect[1]})
+                self._init_linux_grabber()
         mon_num = 0
         default = True
         for item in self.mons:
@@ -113,7 +133,7 @@ class Screen:
                     if item['left'] == self.ed_rect[0] and item['top'] == self.ed_rect[1]:
                         # Get information of monitor
                         self.monitor_number = mon_num
-                        self.mon = self.mss.monitors[self.monitor_number]
+                        self.mon = self.mons[self.monitor_number]
                         self.screen_width = item['width']
                         self.screen_height = item['height']
                         self.aspect_ratio = self.screen_width / self.screen_height
@@ -126,7 +146,7 @@ class Screen:
             # Store the first monitor incase we need it as default
             if mon_num == 1:
                 self.monitor_number = mon_num
-                self.mon = self.mss.monitors[self.monitor_number]
+                self.mon = self.mons[self.monitor_number]
                 self.screen_width = item['width']
                 self.screen_height = item['height']
                 self.aspect_ratio = self.screen_width / self.screen_height
@@ -157,6 +177,7 @@ class Screen:
             '2560x1080':  [0.75, 0.75],  # tested
             '2560x1440':  [1.0, 1.0],    # tested
             '3440x1440':  [1.0, 1.0],    # tested
+            '3840x2160':  [1.5, 1.5],    # 16:9 4K, scaled by height like 2560x1440
             # 'Calibrated': [-1.0, -1.0]
         }
 
@@ -191,11 +212,26 @@ class Screen:
         logger.debug('screen position: x='+str(self.screen_left)+" y="+str(self.screen_top))
         logger.debug('Default scale X, Y: ' + str(self.scaleX) + ", " + str(self.scaleY))
 
+    def _init_linux_grabber(self):
+        """ Create the XShm grabber for the ED window (Linux only). """
+        try:
+            win = linux_capture.find_window(elite_dangerous_window)
+            if win is None:
+                return
+            w = self.ed_rect[2] - self.ed_rect[0]
+            h = self.ed_rect[3] - self.ed_rect[1]
+            self._grabber = linux_capture.XShmGrabber(win.id, w, h)
+        except Exception as ex:
+            logger.error(f"Failed to initialise XShm capture: {ex}")
+            self._grabber = None
+
     @staticmethod
     def get_elite_window_rect() -> typing.Tuple[int, int, int, int] | None:
         """ Gets the ED window rectangle.
         Returns (left, top, right, bottom) or None.
         """
+        if not IS_WINDOWS:
+            return linux_capture.window_rect(elite_dangerous_window)
         hwnd = win32gui.FindWindow(None, elite_dangerous_window)
         if hwnd:
             rect = win32gui.GetWindowRect(hwnd)
@@ -207,6 +243,8 @@ class Screen:
     def elite_window_exists() -> bool:
         """ Does the ED Client Window exist (i.e. is ED running)
         """
+        if not IS_WINDOWS:
+            return linux_capture.window_exists(elite_dangerous_window)
         hwnd = win32gui.FindWindow(None, elite_dangerous_window)
         if hwnd:
             return True
@@ -254,18 +292,33 @@ class Screen:
         @param y_bot:
         @param rgb: Returns RGB when true, else BGR when false.
         """
-        monitor = {
-            "top": self.mon["top"] + int(y_top),
-            "left": self.mon["left"] + int(x_left),
-            "width": int(x_right - x_left),
-            "height": int(y_bot - y_top),
-            "mon": self.monitor_number,
-        }
-        try:
-            image = array(self.mss.grab(monitor))
-        except Exception as e:
-            self._warn_capture_failure(f"mss.grab() raised {type(e).__name__}: {e}")
-            return None
+        if not IS_WINDOWS:
+            if self._grabber is None:
+                # ED may have started after us; try again.
+                self.ed_rect = self.get_elite_window_rect()
+                if self.ed_rect is not None:
+                    self._init_linux_grabber()
+            if self._grabber is None:
+                self._warn_capture_failure("Elite Dangerous window not found for capture.")
+                return None
+            try:
+                image = self._grabber.grab(int(x_left), int(y_top), int(x_right - x_left), int(y_bot - y_top))
+            except Exception as e:
+                self._warn_capture_failure(f"XShm grab raised {type(e).__name__}: {e}")
+                return None
+        else:
+            monitor = {
+                "top": self.mon["top"] + int(y_top),
+                "left": self.mon["left"] + int(x_left),
+                "width": int(x_right - x_left),
+                "height": int(y_bot - y_top),
+                "mon": self.monitor_number,
+            }
+            try:
+                image = array(self.mss.grab(monitor))
+            except Exception as e:
+                self._warn_capture_failure(f"mss.grab() raised {type(e).__name__}: {e}")
+                return None
 
         if image is None or image.size == 0 or image.shape[0] == 0 or image.shape[1] == 0:
             self._warn_capture_failure(

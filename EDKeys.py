@@ -8,12 +8,12 @@ from time import sleep
 from typing import Any, final
 from xml.etree.ElementTree import parse
 
-import win32gui
 import xmltodict
 
 from Screen import set_focus_elite_window
 from directinput import *
 from EDlogger import logger
+import edpaths
 
 """
 Description:  Pulls the keybindings for specific controls from the ED Key Bindings file, this class also
@@ -226,32 +226,69 @@ class EDKeys:
     def check_hotkey_in_bindings(self, key_name: str) -> str:
         """ Check for the action keys. """
         ret = []
+        if not self.bindings or 'Root' not in self.bindings:
+            return ""
         for key, value in self.bindings['Root'].items():
             if type(value) is dict:
                 primary = value.get('Primary', None)
-                if primary is not None:
-                    if primary['@Key'] == key_name:
+                if isinstance(primary, dict):
+                    if primary.get('@Key') == key_name:
                         ret.append(f"{key} (Primary)")
                 secondary = value.get('Secondary', None)
-                if secondary is not None:
-                    if secondary['@Key'] == key_name:
+                if isinstance(secondary, dict):
+                    if secondary.get('@Key') == key_name:
                         ret.append(f"{key} (Secondary)")
         return " and ".join(ret)
 
     # Note:  this routine will grab the *.binds file which is the latest modified
     def get_latest_keybinds(self):
-        path_bindings = environ['LOCALAPPDATA'] + "\Frontier Developments\Elite Dangerous\Options\Bindings"
+        # Explicit override (useful on Linux, or to pin a specific .binds file)
+        override = environ.get('EDAP_ED_BINDINGS_FILE')
+        if override:
+            override = os.path.expanduser(override)
+            if isfile(override):
+                logger.info(f'Using keybindings file from EDAP_ED_BINDINGS_FILE: {override}')
+                return override
+            logger.warning(f'EDAP_ED_BINDINGS_FILE is set but does not exist: {override}')
+
+        path_bindings = edpaths.bindings_dir()
         try:
             list_of_bindings = [join(path_bindings, f) for f in listdir(path_bindings) if
                                 isfile(join(path_bindings, f)) and f.endswith('.binds')]
         except FileNotFoundError as e:
-            return None
+            list_of_bindings = []
 
         if not list_of_bindings:
+            # No custom bindings: the game is using one of its built-in presets. Fall back to the preset file
+            # from the game's ControlSchemes folder so we at least have a full keyboard map to work with.
+            preset = self._get_start_preset(path_bindings) or 'KeyboardMouseOnly'
+            schemes = edpaths.control_schemes_dir()
+            fallback = join(schemes, f'{preset}.binds') if schemes else None
+            msg = (f"No .binds files found in {path_bindings}. Change any binding in-game so the game writes a "
+                   f"Custom.*.binds file, or set EDAP_ED_BINDINGS_FILE.")
+            if fallback and isfile(fallback):
+                logger.warning(f"{msg} Falling back to built-in preset '{preset}': {fallback}")
+                self.ap_ckb('log', f"WARNING: No custom keybindings found; using built-in preset '{preset}'. "
+                                   f"Verify the game is actually using this preset.")
+                return fallback
+            logger.warning(msg)
             return None
         latest_bindings = max(list_of_bindings, key=getmtime)
         logger.info(f'Latest keybindings file:{latest_bindings}')
         return latest_bindings
+
+    @staticmethod
+    def _get_start_preset(path_bindings) -> str | None:
+        """ Reads the preset name from StartPreset.start / StartPreset.4.start if present. """
+        for name in ('StartPreset.4.start', 'StartPreset.start'):
+            try:
+                with open(join(path_bindings, name), 'r') as f:
+                    lines = [l.strip() for l in f.read().splitlines() if l.strip()]
+                    if lines:
+                        return lines[0]
+            except OSError:
+                continue
+        return None
 
     def send_key(self, type, key):
         # Focus Elite window if configured

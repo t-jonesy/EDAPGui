@@ -8,7 +8,7 @@ from Screen_Regions import Quad, load_calibrated_regions
 from StatusParser import StatusParser
 from time import sleep
 from EDlogger import logger
-from pyautogui import typewrite
+from directinput import TypeString as typewrite
 
 
 class EDGalaxyMap:

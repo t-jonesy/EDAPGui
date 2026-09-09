@@ -9,9 +9,13 @@
 # import json
 # from pathlib import Path
 import subprocess
+import sys
 from typing import TypedDict
 
-import keyboard
+if sys.platform == "win32":
+    import keyboard
+else:
+    import linux_hotkeys as keyboard
 import webbrowser
 # import requests
 
@@ -22,8 +26,9 @@ from tkinter import filedialog as fd
 # from tkinter import messagebox
 from tkinter import ttk
 import sv_ttk
-import pywinstyles
 import sys  # Do not delete - prevents a 'super' error from tktoolip.
+if sys.platform == "win32":
+    import pywinstyles
 from tktooltip import ToolTip  # In requirements.txt as 'tkinter-tooltip'.
 
 from EDAPCalibration import Calibration

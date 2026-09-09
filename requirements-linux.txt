@@ -1,0 +1,8 @@
+# Linux requirements for EDAPGui (see readme.md, "Linux" section).
+# Generated from requirements.txt with the Windows-only packages removed and the Linux
+# input/capture dependencies added. Install with:
+#   uv venv --python 3.12 .venv && uv pip install -r requirements-linux.txt
+-r requirements-base.txt
+python-xlib==0.33
+evdev==2.0.0
+pyttsx3==2.99

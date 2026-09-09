@@ -24,3 +24,5 @@ configs/ship_configs.json
 test/match/
 debug-output/
 runs/
+.venv/
+linux_ed/

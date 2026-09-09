@@ -57,11 +57,22 @@ class Voice:
         self.v_quit = True
         
     def voice_exec(self):
-        engine = pyttsx3.init()
-        voices = engine.getProperty('voices')
-        v_id_current = 0   # David
-        engine.setProperty('voice', voices[v_id_current].id)   
-        engine.setProperty('rate', 160)
+        try:
+            engine = pyttsx3.init()
+            voices = engine.getProperty('voices')
+            v_id_current = 0   # David
+            engine.setProperty('voice', voices[v_id_current].id)
+            engine.setProperty('rate', 160)
+        except Exception as e:
+            # No TTS backend available (e.g. espeak not installed on Linux). Drain the queue silently.
+            print(f"Voice: text to speech unavailable ({e}); voice output disabled.")
+            while not self.v_quit:
+                try:
+                    self.q.get(timeout=1)
+                    self.q.task_done()
+                except Exception:
+                    pass
+            return
         while not self.v_quit:
             # check if the voice ID changed
             if self.v_id != v_id_current:

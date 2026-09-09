@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from os import environ, listdir
+import edpaths
 from os.path import getmtime, isfile, join
 import xmltodict
 
@@ -73,7 +74,7 @@ class EDPlayerSettings:
         This routine will grab the *.misc file which is the latest modified
         :return:
         """
-        path_bindings = environ['LOCALAPPDATA'] + "\\Frontier Developments\\Elite Dangerous\\Options\\Player"
+        path_bindings = edpaths.player_dir()
         try:
             list_of_bindings = [join(path_bindings, f) for f in listdir(path_bindings) if
                                 isfile(join(path_bindings, f)) and f.endswith('.misc')]

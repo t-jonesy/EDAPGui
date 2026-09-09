@@ -1,6 +1,23 @@
 import ctypes, sys
-from ctypes import windll, wintypes
+from ctypes import wintypes
 from uuid import UUID
+
+if sys.platform != "win32":
+    # Only meaningful on Windows; edpaths.py provides the cross-platform equivalents.
+    class PathNotFoundException(Exception): pass
+
+    def get_path(folderid, user_handle=None):
+        raise PathNotFoundException("WindowsKnownPaths.get_path is Windows only; use edpaths")
+
+    class FOLDERID:
+        SavedGames = None
+        LocalAppData = None
+
+    class UserHandle:
+        current = None
+        common = None
+else:
+    from ctypes import windll
 
 class GUID(ctypes.Structure):   # [1]
     _fields_ = [
@@ -116,26 +133,27 @@ class UserHandle:   # [3]
     current = wintypes.HANDLE(0)
     common  = wintypes.HANDLE(-1)
 
-_CoTaskMemFree = windll.ole32.CoTaskMemFree     # [4]
-_CoTaskMemFree.restype= None
-_CoTaskMemFree.argtypes = [ctypes.c_void_p]
+if sys.platform == "win32":
+    _CoTaskMemFree = windll.ole32.CoTaskMemFree     # [4]
+    _CoTaskMemFree.restype= None
+    _CoTaskMemFree.argtypes = [ctypes.c_void_p]
 
-_SHGetKnownFolderPath = windll.shell32.SHGetKnownFolderPath     # [5] [3]
-_SHGetKnownFolderPath.argtypes = [
-    ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE, ctypes.POINTER(ctypes.c_wchar_p)
-]
+    _SHGetKnownFolderPath = windll.shell32.SHGetKnownFolderPath     # [5] [3]
+    _SHGetKnownFolderPath.argtypes = [
+        ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE, ctypes.POINTER(ctypes.c_wchar_p)
+    ]
 
-class PathNotFoundException(Exception): pass
+    class PathNotFoundException(Exception): pass
 
-def get_path(folderid, user_handle=UserHandle.common):
-    fid = GUID(folderid)
-    pPath = ctypes.c_wchar_p()
-    S_OK = 0
-    if _SHGetKnownFolderPath(ctypes.byref(fid), 0, user_handle, ctypes.byref(pPath)) != S_OK:
-        raise PathNotFoundException()
-    path = pPath.value
-    _CoTaskMemFree(pPath)
-    return path
+    def get_path(folderid, user_handle=UserHandle.common):
+        fid = GUID(folderid)
+        pPath = ctypes.c_wchar_p()
+        S_OK = 0
+        if _SHGetKnownFolderPath(ctypes.byref(fid), 0, user_handle, ctypes.byref(pPath)) != S_OK:
+            raise PathNotFoundException()
+        path = pPath.value
+        _CoTaskMemFree(pPath)
+        return path
 
 if __name__ == '__main__':
     if len(sys.argv) < 2 or sys.argv[1] in ['-?', '/?']:
