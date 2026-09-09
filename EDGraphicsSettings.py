@@ -1,3 +1,4 @@
+import sys
 from os.path import isfile, join
 import edpaths
 
@@ -57,8 +58,15 @@ class EDGraphicsSettings:
             logger.debug(f"Elite Dangerous Display Config 'Monitor': {self.monitor}.")
 
         if not self.fullscreen_str.upper() == "Borderless".upper():
-            logger.error("Elite Dangerous is not set to BORDERLESS in graphics display settings.")
-            raise Exception('Elite Dangerous is not set to BORDERLESS in graphics display settings.')
+            if sys.platform != "win32" and self.fullscreen_str.upper() == "Windowed".upper():
+                # On Linux we grab the Elite window directly (XShm), so Windowed mode works. It is in
+                # fact preferred when the desktop resolution differs from the game's render resolution,
+                # because Borderless always sizes the window to the desktop and upscales, which breaks
+                # template/OCR matching. Allow Windowed here.
+                logger.warning("Elite Dangerous is in WINDOWED mode (supported on Linux via window capture).")
+            else:
+                logger.error("Elite Dangerous is not set to BORDERLESS in graphics display settings.")
+                raise Exception('Elite Dangerous is not set to BORDERLESS in graphics display settings.')
 
         # Process graphics settings
         if self.settings is not None:

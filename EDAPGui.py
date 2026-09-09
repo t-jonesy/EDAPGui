@@ -277,6 +277,15 @@ class APGui:
         # Send a log entry which will flush out the buffer.
         self.callback('log', 'ED Autopilot loaded successfully.')
 
+        # Auto-load the configured waypoint file, if present, so Waypoint Assist is ready.
+        wp_path = self.ed_ap.config.get('WaypointFilepath', '')
+        if wp_path:
+            try:
+                self.waypoint_editor_tab.editor_load_waypoint_file(wp_path)
+                self.callback('log', 'Loaded waypoint file: ' + str(wp_path))
+            except Exception as e:
+                logger.warning('Auto-load waypoint file failed: ' + str(e))
+
     def setup_hotkeys(self):
         """ Enable or disable hotkeys.
         Global trap for these keys, the 'end' key will stop any current AP action the 'home' key will start the
