@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
-from os import environ
+from os import environ, listdir
 from os.path import expanduser, getmtime, isdir, join
 
 ED_STEAM_APPID = "359320"
@@ -83,15 +83,80 @@ def _prefix_freshness(prefix: str) -> float:
     return newest
 
 
+def _newest_binds_mtime(prefix: str) -> float:
+    """ Newest mtime among a prefix's Options/Bindings/*.binds files, or 0.0 if none. """
+    import glob
+    newest = 0.0
+    pat = join(prefix, "drive_c", "users", "steamuser", "AppData", "Local",
+               "Frontier Developments", "Elite Dangerous", "Options", "Bindings", "*.binds")
+    for f in glob.glob(pat):
+        try:
+            newest = max(newest, getmtime(f))
+        except OSError:
+            pass
+    return newest
+
+
+def _prefix_from_running_game() -> str | None:
+    """ If Elite Dangerous is running, return the Proton prefix it was launched with, read from
+    the process environment (STEAM_COMPAT_DATA_PATH/WINEPREFIX). This is authoritative: it is the
+    exact prefix the live game reads its bindings from. Linux only; returns None if not found. """
+    proc = "/proc"
+    if not isdir(proc):
+        return None
+    try:
+        pids = [d for d in listdir(proc) if d.isdigit()]
+    except OSError:
+        return None
+    for pid in pids:
+        try:
+            with open(join(proc, pid, "cmdline"), "rb") as f:
+                cmd = f.read()
+        except OSError:
+            continue
+        if b"EliteDangerous64.exe" not in cmd and b"/%s/" % ED_STEAM_APPID.encode() not in cmd:
+            continue
+        try:
+            with open(join(proc, pid, "environ"), "rb") as f:
+                raw = f.read()
+        except OSError:
+            continue
+        env = {}
+        for item in raw.split(b"\0"):
+            if b"=" in item:
+                k, _, v = item.partition(b"=")
+                env[k.decode("utf-8", "replace")] = v.decode("utf-8", "replace")
+        cdp = env.get("STEAM_COMPAT_DATA_PATH")
+        if cdp:
+            pfx = join(cdp, "pfx")
+            if isdir(pfx):
+                return pfx
+        wp = env.get("WINEPREFIX")
+        if wp and isdir(wp):
+            return wp
+    return None
+
+
 def _find_proton_prefix() -> str | None:
     p = environ.get("EDAP_ED_PREFIX")
     if p:
         return expanduser(p)
+    # 1. The running game's own prefix is authoritative (handles the case where the game is
+    #    installed in one library but its live compatdata is elsewhere).
+    running = _prefix_from_running_game()
+    if running:
+        return running
     cands = _candidate_prefixes()
     if not cands:
         return None
-    # Prefer the prefix whose bindings/journal files were touched most recently; that is the
-    # one the running game uses. Falls back to the first existing prefix when none has data.
+    # 2. Rank by the newest *.binds file specifically. The Saved Games/journal folder can be a
+    #    symlink shared between prefixes, so journal/Status mtimes tie and cannot disambiguate
+    #    which prefix owns the bindings; the binds files are per-prefix and do.
+    with_binds = [(c, _newest_binds_mtime(c)) for c in cands]
+    with_binds = [(c, m) for c, m in with_binds if m > 0.0]
+    if with_binds:
+        return max(with_binds, key=lambda t: t[1])[0]
+    # 3. Last resort: newest journal/Status, else the first existing prefix.
     best = max(cands, key=_prefix_freshness)
     if _prefix_freshness(best) > 0.0:
         return best
